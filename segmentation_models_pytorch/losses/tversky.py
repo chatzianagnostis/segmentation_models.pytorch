@@ -5,8 +5,7 @@ from ._functional import soft_tversky_score
 from .constants import BINARY_MODE, MULTICLASS_MODE, MULTILABEL_MODE
 from .dice import DiceLoss
 
-__all__ = ["TverskyLoss"]
-
+__all__ = ["TverskyLoss", "FocalTverskyLoss"]
 
 class TverskyLoss(DiceLoss):
     """Tversky loss for image segmentation task.
@@ -62,3 +61,28 @@ class TverskyLoss(DiceLoss):
         return soft_tversky_score(
             output, target, self.alpha, self.beta, smooth, eps, dims
         )
+
+class FocalTverskyLoss(TverskyLoss):
+    def __init__(
+        self,
+        mode: str,
+        classes: List[int] = None,
+        log_loss: bool = False,
+        from_logits: bool = True,
+        smooth: float = 0.0,
+        ignore_index: Optional[int] = None,
+        eps: float = 1e-7,
+        alpha: float = 0.5,
+        beta: float = 0.5,
+        gamma: float = 0.75,  # Default gamma for focal Tversky loss
+    ):
+        super().__init__(
+            mode, classes, log_loss, from_logits, smooth, ignore_index, eps, alpha, beta, gamma
+        )
+
+    def aggregate_loss(self, loss):
+        return torch.pow(loss.mean(), self.gamma)
+
+# Usage in training
+loss_fn = FocalTverskyLoss(mode=MULTICLASS_MODE)
+loss_fn.__name__ = 'FocalTverskyLoss'
