@@ -100,8 +100,9 @@ class Precision(base.Metric):
         )
 
 import torch
-class PanopticQuality(base.Metric):
-    __name__ = "panoptic_quality"
+# Panoptic quality works for ground trouth masks are 1 channel  
+class SegmentationQuality(base.Metric):
+    __name__ = "segmentation_quality"
 
     def __init__(self, eps=1e-7, activation=None, ignore_channels=None, **kwargs):
         super().__init__(**kwargs)
@@ -123,7 +124,7 @@ class PanopticQuality(base.Metric):
         y_pr = y_pr.int()
         y_gt = y_gt.int()
 
-        # Calculate TP, FP, FN
+        # Calculate IoU for each class
         for class_id in torch.unique(y_gt):
             if class_id == 0:  # Skip background
                 continue
@@ -133,34 +134,79 @@ class PanopticQuality(base.Metric):
 
             iou = tp / (tp + fp + fn + self.eps)  # Add small value to avoid division by zero
             self.true_positives.append(iou)
-            self.false_positives += fp
-            self.false_negatives += fn
 
     def compute(self):
-        sq = self.compute_sq(self.true_positives)
-        rq = self.compute_rq(sum(self.true_positives), self.false_positives, self.false_negatives)
-        pq = self.compute_pq(sq, rq)
-        return pq
+        if not self.true_positives:
+            return torch.tensor(0.0)
+        sq = sum(self.true_positives) / len(self.true_positives)
+        return torch.tensor(sq)
 
     def forward(self, y_pr, y_gt):
         self.reset()
         self.update(y_pr, y_gt)
-        pq = self.compute()
-        return torch.tensor(pq, device=y_pr.device)
+        return self.compute()
 
-    def compute_sq(self, true_positives):
-        if not true_positives:
-            return 0.0
-        return sum(true_positives) / len(true_positives)
 
-    def compute_rq(self, true_positives, false_positives, false_negatives):
-        if true_positives == 0:
-            return 0.0
-        precision = true_positives / (true_positives + false_positives + self.eps)
-        recall = true_positives / (true_positives + false_negatives + self.eps)
+class RecognitionQuality(base.Metric):
+    __name__ = "recognition_quality"
+
+    def __init__(self, eps=1e-7, activation=None, ignore_channels=None, **kwargs):
+        super().__init__(**kwargs)
+        self.eps = eps
+        self.activation = Activation(activation)
+        self.ignore_channels = ignore_channels
+        self.reset()
+
+    def reset(self):
+        self.true_positives = 0
+        self.false_positives = 0
+        self.false_negatives = 0
+
+    def update(self, y_pr, y_gt):
+        y_pr = self.activation(y_pr)
+        y_pr = y_pr.argmax(dim=1)  # Convert from logits to predicted class
+
+        # Convert to integer to ensure calculations are done correctly
+        y_pr = y_pr.int()
+        y_gt = y_gt.int()
+
+        # Calculate TP, FP, FN for each class
+        for class_id in torch.unique(y_gt):
+            if class_id == 0:  # Skip background
+                continue
+            tp = ((y_pr == class_id) & (y_gt == class_id)).sum().item()
+            fp = ((y_pr == class_id) & (y_gt != class_id)).sum().item()
+            fn = ((y_pr != class_id) & (y_gt == class_id)).sum().item()
+
+            self.true_positives += tp
+            self.false_positives += fp
+            self.false_negatives += fn
+
+    def compute(self):
+        if self.true_positives == 0:
+            return torch.tensor(0.0)
+        precision = self.true_positives / (self.true_positives + self.false_positives + self.eps)
+        recall = self.true_positives / (self.true_positives + self.false_negatives + self.eps)
         if precision + recall == 0:
-            return 0.0
-        return 2 * (precision * recall) / (precision + recall)
+            return torch.tensor(0.0)
+        rq = 2 * (precision * recall) / (precision + recall)
+        return torch.tensor(rq)
 
-    def compute_pq(self, sq, rq):
-        return sq * rq
+    def forward(self, y_pr, y_gt):
+        self.reset()
+        self.update(y_pr, y_gt)
+        return self.compute()
+
+class PanopticQuality(base.Metric):
+    __name__ = "panoptic_quality"
+
+    def __init__(self, sq_metric, rq_metric, **kwargs):
+        super().__init__(**kwargs)
+        self.sq_metric = sq_metric
+        self.rq_metric = rq_metric
+
+    def forward(self, y_pr, y_gt):
+        sq = self.sq_metric(y_pr, y_gt)
+        rq = self.rq_metric(y_pr, y_gt)
+        pq = sq * rq
+        return pq
