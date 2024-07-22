@@ -124,6 +124,10 @@ class SegmentationQuality(base.Metric):
         y_pr = y_pr.int()
         y_gt = y_gt.int()
 
+        # Flatten the tensors to handle batch and spatial dimensions together
+        y_pr = y_pr.view(-1)
+        y_gt = y_gt.view(-1)
+
         # Calculate IoU for each class
         for class_id in torch.unique(y_gt):
             if class_id == 0:  # Skip background
@@ -169,6 +173,10 @@ class RecognitionQuality(base.Metric):
         # Convert to integer to ensure calculations are done correctly
         y_pr = y_pr.int()
         y_gt = y_gt.int()
+
+        # Flatten the tensors to handle batch and spatial dimensions together
+        y_pr = y_pr.view(-1)
+        y_gt = y_gt.view(-1)
 
         # Calculate TP, FP, FN for each class
         for class_id in torch.unique(y_gt):
